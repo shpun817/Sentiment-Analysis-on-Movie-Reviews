@@ -55,8 +55,8 @@ movies %>% head
 reviews <- tibble(movie = character(), rating = numeric(), review_header = character(), review = character())
 
 # Next, use a for loop along the movies tibble to collect 100 user reviews for each movie
-#for (i in seq_along(movies$title)) {
-for (i in 1:3) { 
+for (i in seq_along(movies$title)) {
+#for (i in 1:3) { 
   # Extract the id that IMDb assigns to each movie
   movie_id <- movies$url[i] %>% str_extract("/title/.+/")
   
@@ -75,7 +75,11 @@ for (i in 1:3) {
   
   # Find the total number of reviews
   page_source <- remDr$getPageSource()[[1]] %>% read_html()
-  num_reviews <- page_source %>% html_node(".lister") %>% html_node(".header") %>% html_nodes("span") %>% .[1] %>% html_text(trim = TRUE) %>% str_sub(end = -9L) %>% gsub(",", "", .) %>% as.numeric()
+  num_reviews <- page_source %>% html_node(".lister") %>% html_node(".header") %>% html_nodes("span") %>% .[1] %>% html_text(trim = TRUE) %>% str_extract(".+ ") %>% str_sub(end = -2) %>% gsub(",", "", .) %>% as.numeric()
+  
+  if (num_reviews <= 0) {
+    next
+  }
   
   # Determine the number of clicks on the show more button.
   # At start the page shows 25 reviews (or less).
@@ -91,23 +95,35 @@ for (i in 1:3) {
     num_clicks <- 3
   }
   
-  # Perform the determined number of clicks
-  for (click in 1:num_clicks) {
-    # Locate the loadmore button
-    loadMore <- remDr$findElement(using = "css", value = ".ipl-load-more__button")
-    loadMore$clickElement()
-    Sys.sleep(3) # Wait for loading
+  if (num_clicks > 0) {
+    # Perform the determined number of clicks
+    for (click in 1:num_clicks) {
+      # Locate the loadmore button
+      loadMore <- remDr$findElement(using = "css", value = ".ipl-load-more__button")
+      loadMore$clickElement()
+      Sys.sleep(3) # Wait for loading
+    }
   }
   
   # Expand all long review
   expanders <- remDr$findElements(using = "css", value = ".expander-icon-wrapper.show-more__control")
-  for (j in seq_along(expanders)) {
-    expanders[[j]]$clickElement()
+  if (expanders %>% length > 0) {
+    for (j in seq_along(expanders)) {
+      expanders[[j]]$clickElement()
+    }
   }
   
   # Locate the list containing all user reviews
   page_source <- remDr$getPageSource()[[1]] %>% read_html()
-  whole_list <- page_source %>% html_node(".lister-list") %>% html_nodes(".lister-item.mode-detail.imdb-user-review.collapsable")
+  whole_list <- page_source %>% html_nodes(".lister-list")
+  if (whole_list %>% length == 0) { # List not found
+    next
+  }
+  whole_list <- whole_list[1] %>% html_nodes(".lister-item.mode-detail.imdb-user-review.collapsable")
+  
+  if (whole_list %>% length == 0) { # No review elements in the list
+    next
+  }
   
   # For each piece of user review, collect the rating and the review
   review_count <- 1 # when this count reaches 101, break the loop
