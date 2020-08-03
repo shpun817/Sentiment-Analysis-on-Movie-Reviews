@@ -162,6 +162,13 @@ for (i in seq_along(movies$title)) {
 
 ```
 
+Write the reviews tibble into a csv file.
+
+```{r}
+reviews %>% write.csv("reviews.csv")
+```
+
+
 In today's lab, we are going to use the functions provided by the `rvest` package to scrape data available on a Amazon product web page. 
 
 
