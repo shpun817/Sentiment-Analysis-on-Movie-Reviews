@@ -23,7 +23,7 @@ to start the server.
 
 ```{r}
 # Connect to the running server
-remDr <- remoteDriver(remoteServerAddr = "localhost", port = 4444L,
+remDr <- remoteDriver(remoteServerAddr = "localhost", port = 4445L,
 browserName = "chrome") # "firefox", "internet explorer", "iphone", etc.
 #str(remDr, max.level = 1)
 
@@ -167,4 +167,114 @@ Write the reviews tibble into a csv file.
 ```{r}
 reviews %>% write.csv("reviews.csv")
 ```
+
+Read the reviews from the csv file.
+
+```{r}
+reviews <- read.csv("reviews.csv")
+```
+
+
+There are 4334 positive reviews and 2756 negative reviews. Let's sample 2500 Positive reviews and 2500 negative reviews and store it to reviews_sample
+
+```{r}
+reviews_pos <- reviews %>% filter(rating >= 6) %>% head(2500)
+reviews_neg <- reviews %>% filter(rating <= 5) %>% head(2500)
+
+reviews_sample <- rbind(reviews_pos, reviews_neg)
+
+reviews_sample
+```
+
+
+
+Now, we have to do some preprocessing. Let's tokenize and remove the stop-word in the review
+
+```{r}
+reviews_sample_token <- reviews_sample %>% unnest_tokens(word,review) %>% filter(!str_detect(word, "^[0-9]*$"))
+reviews_sample_token
+reviews_sample_no_stopword <- reviews_sample_token %>% anti_join(stop_words, by= "word")
+reviews_sample_no_stopword
+reviews_sample_bing <- reviews_sample_no_stopword %>% inner_join(get_sentiments("bing"), by= "word")
+reviews_sample_bing
+```
+
+We have a bag of word now. Let's predict the sentiment according to those word, and evaluate the outcomes by contrasting with actual rating.
+Since some of the reviews just contain a bunch of stopwords, those reviews is removed in the preprocessing.
+
+```{r}
+reviews_predict <- reviews_sample_bing %>% count(X, movie, review_header, rating, sentiment) %>% pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% mutate(sentiment = round(positive * 10 / (positive + negative)) , diff = sentiment - rating  )
+
+reviews_predict
+```
+
+Let's evaluate the outcomes by contrasting with actual rating.
+677 reviews are perfectly predicted.
+
+```{r}
+reviews_predict %>% filter(diff == 0) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) 
+```
+
+
+```{r}
+reviews_predict %>% filter(diff < -5) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) 
+```
+
+Let's evaluate it with the ROC score. Here, we do a binary classification. If the predict score is higher than 6, then it is "positive", otherwise, it is "negative". 
+
+```{r}
+library(ROCR)
+pred <- prediction(reviews_predict$sentiment, ifelse(reviews_predict$rating>5,1,0))
+perf <- performance(pred,"tpr","fpr")
+plot(perf,colorize=TRUE)
+
+```
+
+Evaluation
+
+Since many words are not exist in the RING lexicon (either the word is neutral).
+Words have different meaning in different context. 
+
+
+```{r}
+freq_words <- reviews_sample_bing %>% select("word" , "sentiment" , "rating") %>% group_by(word , sentiment, rating) %>% summarise("count" = n())
+freq_words <- freq_words[order(freq_words$count , decreasing = TRUE),]
+```
+
+The 5 most commonly-used negative word.
+
+```{r}
+freq_words_neg <-freq_words %>% filter(sentiment == "negative") %>% select("word" , "sentiment" , "count") %>% summarise("sum" = sum(count))
+freq_words_neg <- freq_words_neg[order(freq_words_neg$sum , decreasing = TRUE),]
+freq_words_neg <- freq_words_neg %>% head(5)
+freq_words_neg
+```
+
+The 5 most commonly-used positive word.
+
+```{r}
+freq_words_pos <- freq_words %>% filter(sentiment == "positive") %>% select("word" , "sentiment" , "count") %>% summarise("sum" = sum(count))
+freq_words_pos <- freq_words_pos[order(freq_words_pos$sum , decreasing = TRUE),]
+freq_words_pos <- freq_words_pos %>% head(5)
+freq_words_pos
+```
+Below are the graph
+
+```{r}
+
+data <- freq_words %>% inner_join(freq_words_pos, by="word", "sentiment") %>% mutate(weight = count / sum)
+#data <- freq_words %>% filter(word == freq_words_pos[1,1]) %>% mutate(weight = count / freq_words_pos[[1,3]])
+data
+ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
+```
+
+
+
+```{r}
+data <- freq_words %>% inner_join(freq_words_neg, by="word", "sentiment") %>% mutate(weight = count / sum)
+#data <- freq_words %>% filter(word == freq_words_pos[1,1]) %>% mutate(weight = count / freq_words_pos[[1,3]])
+data
+ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
+```
+
 
