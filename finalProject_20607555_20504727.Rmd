@@ -191,7 +191,7 @@ reviews <- read.csv("reviews.csv")
 ```
 
 
-There are 4334 positive reviews and 2756 negative reviews. Let's sample 2500 Positive reviews and 2500 negative reviews and store it to reviews_sample
+There are 4334 positive reviews and 2756 negative reviews, which is a slightly imbalance distribution. Let's sample 2500 Positive reviews and 2500 negative reviews and store it to reviews_sample
 
 ```{r}
 reviews_pos <- reviews %>% filter(rating >= 6) %>% head(2500)
@@ -286,14 +286,14 @@ Below are the graph
 ```{r}
 
 data <- freq_words %>% inner_join(freq_words_pos, by="word", "sentiment") %>% mutate(weight = count / sum)
-ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
+ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x") + ylab("Pr(c|w)") + xlab("Rating") + scale_x_continuous(breaks = 1:10)
 ```
 
 
 
 ```{r}
 data <- freq_words %>% inner_join(freq_words_neg, by="word", "sentiment") %>% mutate(weight = count / sum)
-ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
+ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x") + ylab("Pr(c|w)") + xlab("Rating") + scale_x_continuous(breaks = 1:10)
 ```
 
 
