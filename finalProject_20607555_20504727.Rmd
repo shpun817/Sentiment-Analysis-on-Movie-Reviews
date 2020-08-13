@@ -8,8 +8,13 @@ output:
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE)
 ```
 
-Before proceeding to the exercise, make sure the `tidyverse` is installed in your lab computer.
+# Group 10
+### PUN, Sanford Harrap 20607555
+### WONG, Wing Kin 20504727
 
+
+
+# Setup
 ```{r}
 library(tidyverse)
 library(rvest)
@@ -17,11 +22,13 @@ library(RSelenium)
 library(tidytext)
 ```
 
-First, r un the command
+# Scraping
+
+First, run the command
 java -Dwebdriver.chrome.driver=chromedriver.exe -jar selenium-server-standalone-3.141.59.jar
 to start the server.
 
-```{r}
+```{r eval=FALSE}
 # Connect to the running server
 remDr <- remoteDriver(remoteServerAddr = "localhost", port = 4445L,
 browserName = "chrome") # "firefox", "internet explorer", "iphone", etc.
@@ -39,7 +46,7 @@ remDr$navigate("https://www.imdb.com/chart/moviemeter?sort=rk,asc&mode=simple&pa
 
 For each movie, control the server to click into the movie title and collect necessary data
 
-```{r}
+```{r eval=FALSE}
 # First, create a tibble with movie titles and their hyperlinks
 page_source <- remDr$getPageSource()[[1]] %>% read_html()
 movies_table <- page_source %>% html_node(".lister-list")
@@ -50,13 +57,14 @@ movies <- tibble(title = movies_titles, url = movies_urls)
 movies %>% head
 ```
 
-```{r}
+Store the reviews of each movie into a big tibble "reviews".
+
+```{r eval=FALSE}
 # Create a tibble to store user reviews
 reviews <- tibble(movie = character(), rating = numeric(), review_header = character(), review = character())
 
 # Next, use a for loop along the movies tibble to collect 100 user reviews for each movie
 for (i in seq_along(movies$title)) {
-#for (i in 1:3) { 
   # Extract the id that IMDb assigns to each movie
   movie_id <- movies$url[i] %>% str_extract("/title/.+/")
   
@@ -64,6 +72,7 @@ for (i in seq_along(movies$title)) {
   reviews_url <- movie_id %>% str_c("https://www.imdb.com", ., "reviews?ref_=tt_urv")
   remDr$navigate(reviews_url)
   
+  # Wait for loading
   Sys.sleep(3)
   
   # Locate the hide spoilers checkbox
@@ -162,11 +171,18 @@ for (i in seq_along(movies$title)) {
 
 ```
 
+### Not Enough Reviews
+It is worth mentioning that even though we are tasked to collect 100 reviews per movie, but the total number of reviews we extracted is less than 10000. This is due to the fact that some movies have less than 100 reviews or even no reviews at all. In our analysis, we collect up to 100 reviews from each movie, without putting too much thoughts into those with under 100, as it does not affect the sentiment analysis later on. (In short, for those movies with less than 100 reviews, we simply extracted all.)
+
 Write the reviews tibble into a csv file.
 
-```{r}
+```{r eval=FALSE}
 reviews %>% write.csv("reviews.csv")
 ```
+
+That concludes the process of scraping reviews.
+
+# Analysis
 
 Read the reviews from the csv file.
 
@@ -183,7 +199,7 @@ reviews_neg <- reviews %>% filter(rating <= 5) %>% head(2500)
 
 reviews_sample <- rbind(reviews_pos, reviews_neg)
 
-reviews_sample
+reviews_sample %>% head
 ```
 
 
@@ -192,36 +208,42 @@ Now, we have to do some preprocessing. Let's tokenize and remove the stop-word i
 
 ```{r}
 reviews_sample_token <- reviews_sample %>% unnest_tokens(word,review) %>% filter(!str_detect(word, "^[0-9]*$"))
-reviews_sample_token
 reviews_sample_no_stopword <- reviews_sample_token %>% anti_join(stop_words, by= "word")
-reviews_sample_no_stopword
 reviews_sample_bing <- reviews_sample_no_stopword %>% inner_join(get_sentiments("bing"), by= "word")
-reviews_sample_bing
+reviews_sample_bing %>% head
 ```
 
-We have a bag of word now. Let's predict the sentiment according to those word, and evaluate the outcomes by contrasting with actual rating.
+We have a bag of words now. Let's predict the sentiment according to those word, and evaluate the outcomes by contrasting with actual rating.
 Since some of the reviews just contain a bunch of stopwords, those reviews is removed in the preprocessing.
 
 ```{r}
 reviews_predict <- reviews_sample_bing %>% count(X, movie, review_header, rating, sentiment) %>% pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% mutate(sentiment = round(positive * 10 / (positive + negative)) , diff = sentiment - rating  )
 
-reviews_predict
+reviews_predict %>% head
 ```
 
 Let's evaluate the outcomes by contrasting with actual rating.
 677 reviews are perfectly predicted.
 
 ```{r}
-reviews_predict %>% filter(diff == 0) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) 
+reviews_predict %>% filter(diff == 0) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) %>% head
 ```
 
 
 ```{r}
-reviews_predict %>% filter(diff < -5) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) 
+reviews_predict %>% filter(diff < -5) %>% inner_join(reviews, by= c("X", "movie",  "review_header", "rating") ) %>% select("X","review", "rating", "negative", "positive", "sentiment", "diff"  ) %>% head
 ```
 
-Let's evaluate it with the ROC score. Here, we do a binary classification. If the predict score is higher than 6, then it is "positive", otherwise, it is "negative". 
 
+## Evaluation
+
+We identify 5 causes for the inaccurate prediction.
+
+The current metric of sentiment for each review is very simple: the percentage of positive words in the review, rid of any stop words. We observe the trend that many reviewers gave some criticism (containing negative words) even though they gave 10/10. Under the current metric, negative words create huge impacts on the sentiment prediction.
+
+
+The scale of sentiment scores currently is relatively intolerant to differences. For instance, a score of 9 and a score of 10 are inherently similar to humans, but the current system does not tolerate the small difference.
+Let's try to evaluate with the ROC score. Here, we do a binary classification. If the predict score is higher than 5, then it is "positive", otherwise, it is "negative", thus increasing the tolerance. 
 ```{r}
 library(ROCR)
 pred <- prediction(reviews_predict$sentiment, ifelse(reviews_predict$rating>5,1,0))
@@ -230,10 +252,11 @@ plot(perf,colorize=TRUE)
 
 ```
 
-Evaluation
+As we can see from the graph, the Area Under Curve (AUC) under this binary scale is large, implying a high accuracy.
 
-Since many words are not exist in the RING lexicon (either the word is neutral).
-Words have different meaning in different context. 
+Another reason is that English words convey different meanings depending on the context. Reviewers might have used negative words without knowing it, or vice versa. A good example is the word "funny". A user might have praised a comedy movie for it being funny, but actually funny is considered to be a negative word, thus resulting in a false negative analysis. 
+
+In the English language, double negative is a common way to express appreciation (e.g. "not bad"), but it is very tricky to the program, as the program considers each word separately. Therefore, the program can be improved by using n-grams: consider more consecutive words instead of only one at a time. This way the grammar and order of words, which are particularly important in languages such as English, will be considered in the analysis.
 
 
 ```{r}
@@ -263,8 +286,6 @@ Below are the graph
 ```{r}
 
 data <- freq_words %>% inner_join(freq_words_pos, by="word", "sentiment") %>% mutate(weight = count / sum)
-#data <- freq_words %>% filter(word == freq_words_pos[1,1]) %>% mutate(weight = count / freq_words_pos[[1,3]])
-data
 ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
 ```
 
@@ -272,8 +293,6 @@ ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + fa
 
 ```{r}
 data <- freq_words %>% inner_join(freq_words_neg, by="word", "sentiment") %>% mutate(weight = count / sum)
-#data <- freq_words %>% filter(word == freq_words_pos[1,1]) %>% mutate(weight = count / freq_words_pos[[1,3]])
-data
 ggplot(data, aes(rating, weight)) + geom_point() + geom_line() + theme_bw() + facet_wrap(~ word, ncol = 3, scales = "free_x")
 ```
 
